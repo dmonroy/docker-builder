@@ -1,7 +1,9 @@
 import os
 import shutil
 import subprocess
+import tarfile
 import tempfile
+from docker import Client
 import yaml
 try:
     from yaml import CLoader as Loader
@@ -15,6 +17,9 @@ class BuildCommand(object):
     def from_yaml_file(cls, filepath):
         with open(filepath, 'r') as f:
             return cls(**yaml.load(f.read(), Loader))
+
+    def get_client(self):
+        return Client(base_url=os.getenv('DOCKER_HOST', 'unix://var/run/docker.sock'))
 
     def source_image_name(self):
         raise NotImplemented()
@@ -57,7 +62,7 @@ class BuildCommand(object):
         return '\n'.join(lines)
 
     def entrypoint(self):
-        return ['/bin/sh']
+        return None
 
     def cmd(self):
         return []
@@ -74,22 +79,28 @@ class BuildCommand(object):
     def after_build(self):
         pass
 
-    def build(self):
+    def build(self, callback=None):
         success = True
         self.work_dir = tempfile.mkdtemp()
         self.before_build()
-
+        image_name = self.target_image_name()
         dockerfile_path = os.path.join(self.work_dir, 'Dockerfile')
 
         with open(dockerfile_path, 'w') as dockerfile:
             dockerfile.write(self.dockerfile_content())
 
-        try:
-            subprocess.check_call(
-                ["docker", "build", "-t", self.target_image_name(), self.work_dir]
-            )
-        except subprocess.CalledProcessError:
-            success = False
+        c = self.get_client()
+        for line in c.build(
+            path=self.work_dir, stream=True, rm=True,
+            pull=True, tag=image_name
+        ):
+
+            if callback is not None:
+                callback(line)
+
+        for line in c.push(image_name, stream=True):
+            if callback is not None:
+                callback(line)
 
         self.after_build()
 

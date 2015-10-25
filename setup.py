@@ -11,6 +11,7 @@ setup(
     url='https://github.com/dmonroy/docker-builder',
     install_requires=[
         'pyyaml',
+        'docker-py'
     ],
     description='Build docker images from python',
 )
